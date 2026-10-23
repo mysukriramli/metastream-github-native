@@ -3,7 +3,7 @@ import json
 import hashlib
 import duckdb
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 
 DB_FILE = "data/metastream.db"
 EXPORT_DIR = "public"
@@ -23,29 +23,58 @@ def fetch_as_dicts(cursor):
     cols = [desc[0] for desc in cursor.description]
     return [dict(zip(cols, row)) for row in cursor.fetchall()]
 
+def serialize_row(row: dict) -> dict:
+    """Recursively formats datetimes into ISO 8601 strings and unpacks JSON attributes."""
+    out = {}
+    for k, v in row.items():
+        if hasattr(v, "isoformat"):
+            out[k] = v.isoformat()
+        elif k == "object_value" and isinstance(v, str):
+            try:
+                out[k] = json.loads(v)
+            except Exception:
+                out[k] = v
+        else:
+            out[k] = v
+    return out
+
 def build_static_api(conn):
     """Pre-computes REST API endpoints as static JSON for GitHub Pages"""
     os.makedirs(os.path.join(API_DIR, "entities"), exist_ok=True)
     
     # 1. Export /v1/changes.json
     cur = conn.execute("SELECT * FROM changes ORDER BY change_id DESC LIMIT 100")
-    changes = fetch_as_dicts(cur)
+    changes = [serialize_row(r) for r in fetch_as_dicts(cur)]
     with open(os.path.join(API_DIR, "changes.json"), "w", encoding="utf-8") as f:
-        json.dump({"changes": [
-            {k: str(v) if k == 'timestamp_utc' else v for k, v in c.items()} 
-            for c in changes
-        ]}, f, indent=2)
+        json.dump({"changes": changes}, f, indent=2, default=str)
 
     # 2. Export /v1/entities/{id}.json
     entities = conn.execute("SELECT entity_id FROM entities").fetchall()
     for (ent_id,) in entities:
         cur = conn.execute(f"SELECT * FROM claims WHERE entity_id = '{ent_id}'")
-        claims = fetch_as_dicts(cur)
+        claims = [serialize_row(r) for r in fetch_as_dicts(cur)]
         with open(os.path.join(API_DIR, "entities", f"{ent_id}.json"), "w", encoding="utf-8") as f:
             json.dump({
                 "entity_id": ent_id,
-                "claims": [{k: str(v) if 'time' in k or 'from' in k else v for k, v in c.items()} for c in claims]
-            }, f, indent=2)
+                "claims": claims
+            }, f, indent=2, default=str)
+
+    # 3. Create basic index.html status dashboard
+    index_html = (
+        "<!DOCTYPE html><html><head><title>MetaStream Knowledge Wire</title></head>"
+        "<body style='font-family:sans-serif;padding:2rem;line-height:1.6;'>"
+        "<h1>MetaStream Temporal Knowledge Wire</h1>"
+        "<p>Machine-first temporal knowledge infrastructure published via static CDN.</p>"
+        "<h3>Live Endpoints</h3>"
+        "<ul>"
+        "<li><a href='v1/changes.json'>/v1/changes.json</a></li>"
+        "<li><a href='v1/entities/ent_pypi_requests.json'>/v1/entities/ent_pypi_requests.json</a></li>"
+        "<li><a href='claims.parquet'>claims.parquet (Columnar Database)</a></li>"
+        "<li><a href='changes.parquet'>changes.parquet (Columnar CDC Log)</a></li>"
+        "</ul></body></html>"
+    )
+    with open(os.path.join(EXPORT_DIR, "index.html"), "w", encoding="utf-8") as f:
+        f.write(index_html)
 
 def run():
     os.makedirs("data", exist_ok=True)

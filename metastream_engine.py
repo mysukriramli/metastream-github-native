@@ -18,34 +18,41 @@ def fetch_pypi_data():
     res = requests.get("https://pypi.org/pypi/requests/json", timeout=10)
     return res.json() if res.status_code == 200 else None
 
+def fetch_as_dicts(cursor):
+    """Converts a DuckDB cursor directly into a list of dicts without pandas/numpy."""
+    cols = [desc[0] for desc in cursor.description]
+    return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
 def build_static_api(conn):
     """Pre-computes REST API endpoints as static JSON for GitHub Pages"""
     os.makedirs(os.path.join(API_DIR, "entities"), exist_ok=True)
     
-    # 1. Export /v1/changes
-    changes = conn.execute("SELECT * FROM changes ORDER BY change_id DESC LIMIT 100").fetchdf().to_dict(orient="records")
-    with open(os.path.join(API_DIR, "changes.json"), "w") as f:
+    # 1. Export /v1/changes.json
+    cur = conn.execute("SELECT * FROM changes ORDER BY change_id DESC LIMIT 100")
+    changes = fetch_as_dicts(cur)
+    with open(os.path.join(API_DIR, "changes.json"), "w", encoding="utf-8") as f:
         json.dump({"changes": [
             {k: str(v) if k == 'timestamp_utc' else v for k, v in c.items()} 
             for c in changes
-        ]}, f)
+        ]}, f, indent=2)
 
     # 2. Export /v1/entities/{id}.json
     entities = conn.execute("SELECT entity_id FROM entities").fetchall()
     for (ent_id,) in entities:
-        claims = conn.execute(f"SELECT * FROM claims WHERE entity_id = '{ent_id}'").fetchdf().to_dict(orient="records")
-        with open(os.path.join(API_DIR, "entities", f"{ent_id}.json"), "w") as f:
+        cur = conn.execute(f"SELECT * FROM claims WHERE entity_id = '{ent_id}'")
+        claims = fetch_as_dicts(cur)
+        with open(os.path.join(API_DIR, "entities", f"{ent_id}.json"), "w", encoding="utf-8") as f:
             json.dump({
                 "entity_id": ent_id,
                 "claims": [{k: str(v) if 'time' in k or 'from' in k else v for k, v in c.items()} for c in claims]
-            }, f)
+            }, f, indent=2)
 
 def run():
     os.makedirs("data", exist_ok=True)
     os.makedirs(EXPORT_DIR, exist_ok=True)
     
     conn = duckdb.connect(DB_FILE)
-    with open("schema.sql", "r") as f:
+    with open("schema.sql", "r", encoding="utf-8") as f:
         conn.execute(f.read())
 
     now = datetime.now(timezone.utc)

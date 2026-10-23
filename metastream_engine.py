@@ -6,6 +6,7 @@ import requests
 from datetime import datetime, timezone, date
 
 DB_FILE = "data/metastream.db"
+HISTORY_DIR = "data/history"
 EXPORT_DIR = "public"
 API_DIR = os.path.join(EXPORT_DIR, "v1")
 
@@ -19,12 +20,10 @@ def fetch_pypi_data():
     return res.json() if res.status_code == 200 else None
 
 def fetch_as_dicts(cursor):
-    """Converts a DuckDB cursor directly into a list of dicts without pandas/numpy."""
     cols = [desc[0] for desc in cursor.description]
     return [dict(zip(cols, row)) for row in cursor.fetchall()]
 
 def serialize_row(row: dict) -> dict:
-    """Recursively formats datetimes into ISO 8601 strings and unpacks JSON attributes."""
     out = {}
     for k, v in row.items():
         if hasattr(v, "isoformat"):
@@ -59,7 +58,7 @@ def build_static_api(conn):
                 "claims": claims
             }, f, indent=2, default=str)
 
-    # 3. Create basic index.html status dashboard
+    # 3. Static Web Dashboard
     index_html = (
         "<!DOCTYPE html><html><head><title>MetaStream Knowledge Wire</title></head>"
         "<body style='font-family:sans-serif;padding:2rem;line-height:1.6;'>"
@@ -78,6 +77,7 @@ def build_static_api(conn):
 
 def run():
     os.makedirs("data", exist_ok=True)
+    os.makedirs(HISTORY_DIR, exist_ok=True)
     os.makedirs(EXPORT_DIR, exist_ok=True)
     
     conn = duckdb.connect(DB_FILE)
@@ -85,7 +85,11 @@ def run():
         conn.execute(f.read())
 
     now = datetime.now(timezone.utc)
-    
+    now_iso = now.isoformat()
+    date_str = now.strftime("%Y-%m-%d")
+    year_str = now.strftime("%Y")
+    month_str = now.strftime("%m")
+
     # Ingest Data
     pypi_data = fetch_pypi_data()
     if pypi_data:
@@ -105,18 +109,43 @@ def run():
             # Atomic Database Transaction
             conn.execute("BEGIN TRANSACTION")
             conn.execute(f"INSERT OR IGNORE INTO entities VALUES ('{entity_id}', 'software_package', 'requests')")
-            conn.execute(f"INSERT INTO evidence VALUES ('{evidence_id}', 'src_pypi', '{now.isoformat()}', '{artifact_hash}', 'https://github.com/...')")
+            conn.execute(f"INSERT INTO evidence VALUES ('{evidence_id}', 'src_pypi', '{now_iso}', '{artifact_hash}', 'https://pypi.org/pypi/requests/json')")
             conn.execute(f"""
                 INSERT INTO claims (claim_id, entity_id, predicate, object_value, source_id, evidence_id, valid_from, first_observed_at, content_hash)
-                VALUES ('{claim_id}', '{entity_id}', 'HAS_VERSION', '{json.dumps(claim_payload)}', 'src_pypi', '{evidence_id}', '{now.isoformat()}', '{now.isoformat()}', '{claim_hash}')
+                VALUES ('{claim_id}', '{entity_id}', 'HAS_VERSION', '{json.dumps(claim_payload)}', 'src_pypi', '{evidence_id}', '{now_iso}', '{now_iso}', '{claim_hash}')
             """)
             commit_id = conn.execute("SELECT nextval('seq_commit_id')").fetchone()[0]
-            conn.execute(f"INSERT INTO changes (commit_id, entity_id, operation, claim_id, timestamp_utc) VALUES ({commit_id}, '{entity_id}', 'CLAIM_ADDED', '{claim_id}', '{now.isoformat()}')")
+            conn.execute(f"INSERT INTO changes (commit_id, entity_id, operation, claim_id, timestamp_utc) VALUES ({commit_id}, '{entity_id}', 'CLAIM_ADDED', '{claim_id}', '{now_iso}')")
             conn.execute("COMMIT")
             print(f"Committed new claim: {claim_id}")
 
-    # Export Parquet Database for AI Agents
+            # 1. PERMANENT GIT-NATIVE HISTORY (Append-only daily ledger)
+            month_dir = os.path.join(HISTORY_DIR, year_str, month_str)
+            os.makedirs(month_dir, exist_ok=True)
+            daily_history_file = os.path.join(month_dir, f"{date_str}.jsonl")
+            
+            ledger_entry = {
+                "commit_id": commit_id,
+                "timestamp_utc": now_iso,
+                "operation": "CLAIM_ADDED",
+                "entity_id": entity_id,
+                "claim_id": claim_id,
+                "predicate": "HAS_VERSION",
+                "object_value": claim_payload,
+                "evidence_id": evidence_id,
+                "content_hash": claim_hash
+            }
+            with open(daily_history_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(ledger_entry) + "\n")
+                f.flush()
+
+    # 2. PERMANENT CDN COLUMNAR PARTITIONS (Parquet exports)
     conn.execute(f"EXPORT DATABASE '{EXPORT_DIR}' (FORMAT PARQUET)")
+    
+    # Export partition for historical time-travel queries
+    hist_parquet_dir = os.path.join(EXPORT_DIR, "history", year_str, month_str)
+    os.makedirs(hist_parquet_dir, exist_ok=True)
+    conn.execute(f"COPY (SELECT * FROM claims) TO '{hist_parquet_dir}/{date_str}_claims.parquet' (FORMAT PARQUET)")
     
     # Export Static REST API
     build_static_api(conn)

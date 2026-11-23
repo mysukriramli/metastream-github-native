@@ -1,0 +1,19 @@
+{
+  "entity_id": "ent_pypi_requests",
+  "claims": [
+    {
+      "claim_id": "clm_c43e703e999cfe62",
+      "entity_id": "ent_pypi_requests",
+      "predicate": "HAS_VERSION",
+      "object_value": {
+        "version": "2.34.2"
+      },
+      "source_id": "src_pypi",
+      "evidence_id": "evid_7579475cc5eedee6",
+      "valid_from": "2026-10-23T01:14:18.051621",
+      "first_observed_at": "2026-10-23T01:14:18.051621",
+      "status": "ACTIVE",
+      "content_hash": "c43e703e999cfe6224663dfc8abd381b2399dadfc0d348c5f6f462471a3039d6"
+    }
+  ]
+}

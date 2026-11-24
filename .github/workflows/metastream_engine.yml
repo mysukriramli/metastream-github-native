@@ -15,13 +15,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ingest-and-publish:
-    name: Ingest, Persist and Publish
+  ingest-and-build:
+    name: Ingest, Persist and Build
     runs-on: ubuntu-24.04
-
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout Repository
@@ -34,11 +30,11 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: "**/requirements.txt"
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
@@ -54,6 +50,7 @@ jobs:
 
       - name: Execute MetaStream Core Engine
         run: |
+          mkdir -p data
           if [ -f metastream_engine.py ]; then
             python metastream_engine.py
           else
@@ -63,12 +60,10 @@ jobs:
       - name: Create Pages Site
         run: |
           rm -rf public
-
           mkdir -p public
-
           touch public/.nojekyll
 
-          cat > public/index.html <<EOF
+          cat << 'EOF' > public/index.html
           <!DOCTYPE html>
           <html lang="en">
           <head>
@@ -87,11 +82,8 @@ jobs:
       - name: Validate Pages Payload
         run: |
           set -e
-
           test -d public
-
           test -f public/index.html
-
           test -s public/index.html
 
           echo "===== PUBLIC CONTENTS ====="
@@ -111,9 +103,9 @@ jobs:
           if git diff --cached --quiet; then
             echo "No new historical claims."
           else
-            git commit -m "chore(history): record append-only temporal ledger [skip ci]" || true
-            git pull --rebase --autostash origin "${{ github.ref_name }}" || true
-            git push origin HEAD:${{ github.ref_name }}" || true
+            git commit -m "chore(history): record append-only temporal ledger [skip ci]"
+            git pull --rebase --autostash origin "${{ github.ref_name }}"
+            git push origin "HEAD:${{ github.ref_name }}"
           fi
 
       - name: Configure Pages
@@ -124,6 +116,16 @@ jobs:
         with:
           path: public
 
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: ingest-and-build
+    runs-on: ubuntu-24.04
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
       - name: Deploy Pages
         id: deployment
         uses: actions/deploy-pages@v4
@@ -131,4 +133,4 @@ jobs:
       - name: Deployment Summary
         run: |
           echo "Deployment Complete"
-          echo "${{ steps.deployment.outputs.page_url }}"
+          echo "URL: ${{ steps.deployment.outputs.page_url }}"

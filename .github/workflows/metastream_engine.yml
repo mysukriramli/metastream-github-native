@@ -67,46 +67,43 @@ jobs:
           touch public/.nojekyll
 
           if [ ! -f public/index.html ]; then
-            cat > public/index.html <<'HTML'
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MetaStream Engine</title>
-  <style>
-    body {
-      font-family: system-ui, sans-serif;
-      margin: 40px;
-      background: #0b0f19;
-      color: #ffffff;
-    }
 
-    h1 {
-      color: #4ade80;
-    }
+            echo '<!DOCTYPE html>' > public/index.html
+            echo '<html lang="en">' >> public/index.html
+            echo '<head>' >> public/index.html
+            echo '  <meta charset="UTF-8">' >> public/index.html
+            echo '  <meta name="viewport" content="width=device-width, initial-scale=1">' >> public/index.html
+            echo '  <title>MetaStream Engine</title>' >> public/index.html
+            echo '  <style>' >> public/index.html
+            echo '    body {' >> public/index.html
+            echo '      font-family: system-ui, sans-serif;' >> public/index.html
+            echo '      margin: 40px;' >> public/index.html
+            echo '      background: #0b0f19;' >> public/index.html
+            echo '      color: #ffffff;' >> public/index.html
+            echo '    }' >> public/index.html
+            echo '    h1 {' >> public/index.html
+            echo '      color: #4ade80;' >> public/index.html
+            echo '    }' >> public/index.html
+            echo '    a {' >> public/index.html
+            echo '      color: #60a5fa;' >> public/index.html
+            echo '    }' >> public/index.html
+            echo '    .card {' >> public/index.html
+            echo '      background: #111827;' >> public/index.html
+            echo '      padding: 24px;' >> public/index.html
+            echo '      border-radius: 12px;' >> public/index.html
+            echo '      max-width: 900px;' >> public/index.html
+            echo '    }' >> public/index.html
+            echo '  </style>' >> public/index.html
+            echo '</head>' >> public/index.html
+            echo '<body>' >> public/index.html
+            echo '  <div class="card">' >> public/index.html
+            echo '    <h1>MetaStream Engine</h1>' >> public/index.html
+            echo '    <p>Temporal ingestion pipeline active.</p>' >> public/index.html
+            echo '    <p>Generated automatically by GitHub Actions.</p>' >> public/index.html
+            echo '  </div>' >> public/index.html
+            echo '</body>' >> public/index.html
+            echo '</html>' >> public/index.html
 
-    a {
-      color: #60a5fa;
-    }
-
-    .card {
-      background: #111827;
-      padding: 24px;
-      border-radius: 12px;
-      max-width: 900px;
-    }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>MetaStream Engine</h1>
-    <p>Temporal ingestion pipeline active.</p>
-    <p>Generated automatically by GitHub Actions.</p>
-  </div>
-</body>
-</html>
-HTML
           fi
 
           ls -la public
@@ -119,6 +116,11 @@ HTML
           test -d public
           test -f public/index.html
 
+          if [ ! -s public/index.html ]; then
+            echo "index.html is empty"
+            exit 1
+          fi
+
           echo "index.html exists"
 
       - name: Commit and Push Historical Ledger
@@ -130,13 +132,17 @@ HTML
           [ -d public ] && git add public/ || true
 
           if git diff --cached --quiet; then
+
             echo "No new historical claims to commit."
+
           else
+
             git commit -m "chore(history): record append-only temporal ledger [skip ci]" || true
 
             git pull --rebase --autostash origin "${{ github.ref_name }}" || true
 
             git push origin HEAD:${{ github.ref_name }} || true
+
           fi
 
       - name: Configure GitHub Pages
@@ -152,6 +158,11 @@ HTML
             exit 1
           fi
 
+          if [ ! -s public/index.html ]; then
+            echo "ERROR: public/index.html empty"
+            exit 1
+          fi
+
       - name: Upload GitHub Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -163,6 +174,9 @@ HTML
 
       - name: Deployment Summary
         run: |
+          echo "================================"
+          echo "MetaStream Engine"
           echo "Deployment complete"
+          echo "================================"
           echo "Page URL:"
           echo "${{ steps.deployment.outputs.page_url }}"
